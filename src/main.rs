@@ -64,12 +64,17 @@ fn setup(mut cmd: Commands) {
         block(Color::srgb(0.95, 0., 0.)),
     );
     cmd.spawn(head);
-    let neck = (Body, Neck, start - dir, block(Color::WHITE));
+    let neck = (
+        Body,
+        Neck,
+        Transform::from_translation(start.translation - dir),
+        block(Color::WHITE),
+    );
     let neck = cmd.spawn(neck).id();
     let tail = (
         Body,
         Tail,
-        start - dir - dir,
+        Transform::from_translation(start.translation - dir - dir),
         block(Color::WHITE),
         Pre(neck),
     );
@@ -80,24 +85,23 @@ fn setup(mut cmd: Commands) {
     cmd.insert_resource(Rander(rander));
 }
 
-fn check_control(input: Res<ButtonInput<KeyCode>>, mut head: Query<&mut Dir, With<Head>>) {
-    let mut dir = head.single_mut();
+fn check_control(input: Res<ButtonInput<KeyCode>>, mut head_dir: Single<&mut Dir, With<Head>>) {
     if (input.just_pressed(KeyCode::KeyW) || input.just_pressed(KeyCode::ArrowUp))
-        && *dir != Dir::Down
+        && **head_dir != Dir::Down
     {
-        *dir = Dir::Up;
+        **head_dir = Dir::Up;
     } else if (input.just_pressed(KeyCode::KeyS) || input.just_pressed(KeyCode::ArrowDown))
-        && *dir != Dir::Up
+        && **head_dir != Dir::Up
     {
-        *dir = Dir::Down;
+        **head_dir = Dir::Down;
     } else if (input.just_pressed(KeyCode::KeyA) || input.just_pressed(KeyCode::ArrowLeft))
-        && *dir != Dir::Right
+        && **head_dir != Dir::Right
     {
-        *dir = Dir::Left;
+        **head_dir = Dir::Left;
     } else if (input.just_pressed(KeyCode::KeyD) || input.just_pressed(KeyCode::ArrowRight))
-        && *dir != Dir::Left
+        && **head_dir != Dir::Left
     {
-        *dir = Dir::Right;
+        **head_dir = Dir::Right;
     }
 }
 
@@ -107,10 +111,9 @@ fn spawn_food(
     mut rander: ResMut<Rander>,
 ) {
     let admissable = (-BLOCK_DNUM..=BLOCK_DNUM)
-        .map(|x| {
+        .flat_map(|x| {
             (-BLOCK_DNUM..=BLOCK_DNUM).map(move |y| (x as f32 * BLOCK_SIZE, y as f32 * BLOCK_SIZE))
         })
-        .flatten()
         .filter(|(x, y)| {
             taboos
                 .iter()
@@ -126,18 +129,18 @@ fn move_head(
     mut cmd: Commands,
     time: Res<Time>,
     food: Query<(Entity, &Transform), (With<Food>, Without<Head>)>,
-    mut head: Query<(&mut Transform, &Dir, &mut SnakeTimer, &mut Head)>,
+    head: Single<(&mut Transform, &Dir, &mut SnakeTimer, &mut Head)>,
     body: Query<(), With<Body>>,
     mut motion: ResMut<NextState<Motion>>,
 ) {
-    let (mut head_pos, dir, mut elapsed, mut prehead) = head.single_mut();
+    let (mut head_pos, dir, mut elapsed, mut prehead) = head.into_inner();
     if !elapsed.0.tick(time.delta()).just_finished() {
         motion.set(Motion::Stay);
         return;
     }
     prehead.pre = head_pos.translation;
     head_pos.translation = {
-        let mut new_pos = (*head_pos + *dir).translation;
+        let mut new_pos = head_pos.translation + *dir;
         if new_pos.x - RANGE.0 < -0.1 {
             new_pos.x = RANGE.1;
         } else if new_pos.x - RANGE.1 > 0.1 {
@@ -163,13 +166,12 @@ fn move_head(
 fn move_body(
     mut cmd: Commands,
     eat: Res<State<Motion>>,
-    head: Query<&Head>,
-    neck: Query<Entity, With<Neck>>,
-    mut tail: Query<(Entity, &mut Transform, &Pre), With<Tail>>,
+    head: Single<&Head>,
+    neck: Single<Entity, With<Neck>>,
+    tail: Single<(Entity, &mut Transform, &Pre), With<Tail>>,
 ) {
-    let neck = neck.single();
-    let head = head.single();
-    let (tail, mut tail_pos, tail_pre) = tail.single_mut();
+    let neck = neck.into_inner();
+    let (tail, mut tail_pos, tail_pre) = tail.into_inner();
     if *eat == Motion::Eat {
         let new = cmd
             .spawn((
@@ -194,10 +196,9 @@ fn move_body(
 
 fn eat_self(
     // mut cmd: Commands,
-    head: Query<&Transform, With<Head>>,
+    head: Single<&Transform, With<Head>>,
     body: Query<&Transform, With<Body>>,
 ) {
-    let head = head.single();
     for body in body.iter() {
         if head.translation.distance(body.translation) <= 1.0 {
             std::process::exit(0);
@@ -256,54 +257,54 @@ enum Dir {
     Right,
 }
 
-impl std::ops::Sub<Dir> for Transform {
-    type Output = Transform;
+impl std::ops::Sub<Dir> for Vec3 {
+    type Output = Vec3;
 
     fn sub(self, rhs: Dir) -> Self::Output {
         let mut res = self;
         match rhs {
-            Dir::Up => res.translation.y -= BLOCK_SIZE,
-            Dir::Down => res.translation.y += BLOCK_SIZE,
-            Dir::Left => res.translation.x += BLOCK_SIZE,
-            Dir::Right => res.translation.x -= BLOCK_SIZE,
+            Dir::Up => res.y -= BLOCK_SIZE,
+            Dir::Down => res.y += BLOCK_SIZE,
+            Dir::Left => res.x += BLOCK_SIZE,
+            Dir::Right => res.x -= BLOCK_SIZE,
         }
         res
     }
 }
 
-impl std::ops::Add<Dir> for Transform {
-    type Output = Transform;
+impl std::ops::Add<Dir> for Vec3 {
+    type Output = Vec3;
 
     fn add(self, rhs: Dir) -> Self::Output {
         let mut res = self;
         match rhs {
-            Dir::Up => res.translation.y += BLOCK_SIZE,
-            Dir::Down => res.translation.y -= BLOCK_SIZE,
-            Dir::Left => res.translation.x -= BLOCK_SIZE,
-            Dir::Right => res.translation.x += BLOCK_SIZE,
+            Dir::Up => res.y += BLOCK_SIZE,
+            Dir::Down => res.y -= BLOCK_SIZE,
+            Dir::Left => res.x -= BLOCK_SIZE,
+            Dir::Right => res.x += BLOCK_SIZE,
         }
         res
     }
 }
 
-impl std::ops::SubAssign<Dir> for Transform {
+impl std::ops::SubAssign<Dir> for Vec3 {
     fn sub_assign(&mut self, rhs: Dir) {
         match rhs {
-            Dir::Up => self.translation.y -= BLOCK_SIZE,
-            Dir::Down => self.translation.y += BLOCK_SIZE,
-            Dir::Left => self.translation.x += BLOCK_SIZE,
-            Dir::Right => self.translation.x -= BLOCK_SIZE,
+            Dir::Up => self.y -= BLOCK_SIZE,
+            Dir::Down => self.y += BLOCK_SIZE,
+            Dir::Left => self.x += BLOCK_SIZE,
+            Dir::Right => self.x -= BLOCK_SIZE,
         }
     }
 }
 
-impl std::ops::AddAssign<Dir> for Transform {
+impl std::ops::AddAssign<Dir> for Vec3 {
     fn add_assign(&mut self, rhs: Dir) {
         match rhs {
-            Dir::Up => self.translation.y += BLOCK_SIZE,
-            Dir::Down => self.translation.y -= BLOCK_SIZE,
-            Dir::Left => self.translation.x -= BLOCK_SIZE,
-            Dir::Right => self.translation.x += BLOCK_SIZE,
+            Dir::Up => self.y += BLOCK_SIZE,
+            Dir::Down => self.y -= BLOCK_SIZE,
+            Dir::Left => self.x -= BLOCK_SIZE,
+            Dir::Right => self.x += BLOCK_SIZE,
         }
     }
 }
